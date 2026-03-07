@@ -1,195 +1,118 @@
-# Sonar Object Detection with Transfer Learning and Domain Adaptation
+# Bank Loan Risk Analysis
+### Default Risk Prediction on 1.2M+ Lending Club Loans
 
 ![Python](https://img.shields.io/badge/Python-3.10+-3776AB?style=flat&logo=python&logoColor=white)
-![PyTorch](https://img.shields.io/badge/PyTorch-Deep%20Learning-EE4C2C?style=flat&logo=pytorch&logoColor=white)
-![TorchVision](https://img.shields.io/badge/TorchVision-Detection%20API-EE4C2C?style=flat&logo=pytorch&logoColor=white)
+![Pandas](https://img.shields.io/badge/Pandas-Data%20Wrangling-150458?style=flat&logo=pandas)
+![scikit-learn](https://img.shields.io/badge/scikit--learn-Modeling-F7931E?style=flat&logo=scikit-learn)
 ![Status](https://img.shields.io/badge/Status-Complete-2ea44f?style=flat)
-![Context](https://img.shields.io/badge/Context-MSc%20Research%20Placement-6c757d?style=flat)
 
-## Context
+## The Problem
 
-This project originated from a professional placement at [Seabed.AI](https://seabed.ai), a UK-based startup specialising in autonomous seabed survey and mapping. The research conducted during that placement became the foundation of my MSc Data Science dissertation at the University of Greenwich.
+Default risk models trained on imbalanced data produce misleadingly high accuracy while failing to identify the cases that matter most. A model that predicts "fully paid" for every loan achieves 80% accuracy on Lending Club data, but catches almost none of the actual defaults. In lending, missing a default is far more costly than a false alarm.
 
-The core contribution is **DCCAN (Domain-Conditional Combined Adversarial Network)**, a novel domain adaptation architecture I designed and implemented to address sonar object detection under domain shift. DCCAN is not an existing model from the literature — it was proposed, built, and evaluated as original work during this project.
-
-This repository documents the core technical work. Day-to-day responsibilities at Seabed.AI also included data validation, ETL support, dashboarding, and cross-team reporting, which are not fully represented here due to NDA and scope.
-
-## Problem Framing
-
-Sidescan sonar is critical for seabed mapping, infrastructure inspection, archaeology, and defense. Automatic detection is difficult because images contain speckle noise, low contrast, and strong variation between surveys, and labeled datasets are scarce. The core challenge addressed was improving object detection robustness when training and deployment data differ significantly due to these environmental and sensor factors.
-
-## Emphasis
-
-- Data preparation and validation under imperfect conditions
-- Evaluation discipline and precision-recall trade-offs
-- Robustness and stability rather than benchmark performance
-
-**Author:** Gomis Kablan Assebian
-
-## Repository Structure
-
-```
-sonar-object-detection/
-├── scripts/
-│   ├── convert_yolo_to_voc.ipynb    # YOLO → Pascal VOC conversion pipeline
-│   ├── voc_dataset.py               # Custom PyTorch Dataset for VOC-format sonar data
-│   └── loss_wrappers.py             # AMP-safe domain adversarial loss wrapper
-├── notebooks/
-│   ├── Faster_RCNN_Baseline_Model.ipynb          # Baseline training (raw/denoised/CLAHE)
-│   ├── Faster_RCNN_Baseline_Model_20_Epoch.ipynb # 20-epoch baseline experiments
-│   └── DANN_DCCAN_20_25_epoch_tuned.ipynb        # DANN + DCCAN training & evaluation
-├── outputs/                         # Detection visualizations and evaluation plots
-│   ├── detection_per_image_20ep_mod.png
-│   └── distri_of_detect_20_ep_mod.png
-└── README.md
-```
+This project investigates that tradeoff directly: what does it cost to optimize for accuracy, and what do you gain by optimizing for recall instead?
 
 ## Dataset
 
-- **Source**: 3,465 sidescan sonar images annotated in YOLO format
-- **Classes**:
-  - `object` (class 1): physical structures on the seabed
-  - `shadow` (class 2): acoustic shadows behind objects
-  - `background` (class 0): implicit class
+**Source:** [Lending Club Loan Data](https://www.kaggle.com/datasets/wordsforthewise/lending-club) — available on Kaggle.
 
-### Conversion
+The raw dataset contains 2,260,701 rows and 151 columns. After filtering to loans with known outcomes (Fully Paid or Charged Off) and selecting 16 relevant features, the working dataset is 1,265,976 rows.
 
-YOLO labels were converted to **Pascal VOC** format using `scripts/convert_yolo_to_voc.ipynb`. The pipeline uses multi-threaded batch processing to convert bounding boxes to VOC coordinates, filter empty or malformed annotations, remap class labels (correcting an early mislabeling issue in the original scheme), and generate the standard VOC directory structure (`Annotations/`, `JPEGImages/`, `ImageSets/Main/`). A stratified split (80/10/10 train/val/test) preserves class balance across subsets.
+**Target variable:** `loan_default` (binary: 1 = Charged Off, 0 = Fully Paid)
 
-## Preprocessing Variants
+**Features used:**
 
-Three dataset configurations were constructed to reflect different domain characteristics:
+| Type | Features |
+|---|---|
+| Numerical | `loan_amnt`, `int_rate`, `installment`, `annual_inc`, `dti`, `fico_range_high`, `open_acc`, `revol_util`, `total_acc` |
+| Categorical | `term`, `emp_length`, `grade`, `home_ownership`, `purpose` |
 
-- **Raw**: Unmodified sonar images — the target domain, reflecting full operational noise and variability.
-- **Denoised**: 3x3 median blur for speckle noise reduction, used as the labeled source domain in adaptation experiments.
-- **CLAHE + Augmented**: Contrast-limited adaptive histogram equalization followed by geometric augmentations (flips, scaling, brightness jitter). Visually sharper, but amplified background textures that increased false positives, degrading overall detector precision.
+## Pipeline Overview
 
-## Models
+**1. Data cleaning and feature engineering**
+Filtered out in-progress loans to keep only resolved outcomes. Parsed mixed-type fields: `term` from "36 months" to numeric, `emp_length` from "10+ years" to float, `revol_util` from percentage string to float. Dropped rows with remaining NaN values. Final shape: 1,265,976 rows, 16 columns.
 
-**Detector**: Faster R-CNN with ResNet-50 FPN backbone (pretrained on COCO), with the prediction head replaced for 3 classes.
+**2. Exploratory data analysis**
+Boxplots comparing numeric distributions by default status, countplots for categorical features, and a correlation matrix to identify multicollinearity before modeling.
 
-### Variants
+**3. Encoding**
+One-hot encoded categorical variables using `pd.get_dummies()` with `drop_first=True`. Final feature matrix: 37 columns.
 
-- **Baselines**: trained on raw, denoised, or CLAHE-augmented sonar data
-- **DANN**: Domain-Adversarial Neural Network with global feature alignment via Gradient Reversal Layer
-- **DCCAN**: Domain-Conditional Combined Adversarial Network (hybrid adversarial model, proposed in this work)
+**4. Baseline model (imbalanced)**
+Logistic regression via statsmodels trained on the full dataset and evaluated on the same data. Intercept added manually.
 
-## DCCAN: A Novel Model Proposed in This Work
+**5. Balanced model (downsampled)**
+Downsampled the majority class to match the minority class size (247K each) using `sklearn.utils.resample()`. Retrained logistic regression and compared performance.
 
-**Problem:**
-Standard transfer learning struggled with sonar domain shift. Baselines plateaued at ~0.15 AP50. DANN improved recall but hurt precision, while standalone CDAN (class-conditional alignment) was numerically unstable under automatic mixed precision due to its outer-product mapping.
+## EDA Highlights
 
-**Idea:**
-Combine the strengths of DANN and CDAN while adding a third alignment path to stabilize learning. The design was motivated by observing that shadows vs. objects require class-aware alignment (CDAN), global differences between raw and denoised sonar require holistic alignment (DANN), and early region proposals carry domain cues that benefit from low-level alignment.
+**Boxplots: Numerical features vs loan default**
 
-**Architecture:**
-DCCAN integrates three adversarial components into Faster R-CNN, each attached via a Gradient Reversal Layer:
+![Boxplots](outputs/Boxplots%20(numerical%20vs.%20loan_default).png)
 
-1. **Global alignment (DANN-style):** A domain discriminator (MLP, 1024 hidden units) operates on adaptive-average-pooled backbone features (256-d).
+Defaulters show higher interest rates and lower FICO scores on average. `dti`, `revol_util`, and `annual_inc` all exhibit heavy right tails driven by outliers.
 
-2. **Class-conditional alignment (CDAN-style):** A discriminator receives the flattened outer product of L2-normalized pooled features and proxy class logits (256 x 3 = 768-d). Stabilized with temperature sharpening (T = 0.6) and confidence gating that filters low-certainty samples early in training (threshold decays from 0.40 to 0.20 over training).
+**Countplots: Categorical features vs loan default**
 
-3. **Proposal-level alignment:** A lightweight 2-layer convolutional domain head (Conv 3x3 → ReLU → Conv 1x1) operates directly on FPN P3 feature maps, with global average pooling to produce per-sample domain logits.
+![Countplots](outputs/Countplots%20(categorical%20vs.%20loan_default).png)
 
-**Training objective:**
+Grades B and C account for the highest loan volumes and the most fully paid loans overall. Grade A shows the best repayment ratio relative to its volume. Grades D, E, and F carry progressively worse default rates relative to their volume, representing the clearest risk signal across grade categories. Grade G has negligible volume.
 
-```
-L_total = L_det + λ_DANN(t) · L_DANN + λ_CDAN(t) · L_CDAN + λ_RPN(t) · L_RPN
-```
+Among home ownership types, MORTGAGE and RENT dominate total volume. RENT shows a slightly worse default-to-repayment ratio than MORTGAGE. OWN borrowers repay at a relatively higher rate.
 
-- `L_det`: standard Faster R-CNN detection loss (classification + regression) on labeled source data
-- `L_DANN`, `L_CDAN`, `L_RPN`: binary cross-entropy domain losses from the three alignment paths
-- Each λ follows a logistic ramp schedule: `γ(p) = 2 / (1 + exp(−10p)) − 1`, where `p ∈ [0,1]` is normalized training progress
-- Fixed maximum coefficients: **λ_DANN = 0.20**, **λ_CDAN = 0.30**, **λ_RPN = 0.10**
+Among loan purposes, `debt_consolidation` dominates total volume with a proportional but not alarming default rate. `small_business` stands out with a disproportionately high default rate relative to its volume. Low-volume categories like `renewable_energy`, `medical`, and `vacation` have insufficient observations to support reliable conclusions.
 
-**Stability safeguards:** 2-epoch backbone freeze warmup (detection head only, no adaptation pressure), gradient clipping (max norm 5.0), and all training under AMP (autocast + GradScaler).
+**Correlation matrix**
 
-**Result:**
-A stable, mixed-precision compatible model that achieved the best overall precision-recall balance across all experiments.
+![Correlation Heatmap](outputs/Correlation%20heatmap.png)
 
-## Training
+`loan_amnt` and `installment` are highly correlated (0.95), indicating redundancy. The target variable shows weak individual correlations with all features (below 0.3), which is typical in credit risk and explains why logistic regression alone is limited here.
 
-- **Framework**: PyTorch + TorchVision detection API
-- **Hardware**: NVIDIA A100 GPU (Google Colab Pro)
-- **Precision**: AMP enabled for all runs
-- **Epochs**: 20 for all models
+## Model Results
 
-### Baselines
+| Metric | Imbalanced Model | Balanced Model |
+|---|---|---|
+| Recall (defaults) | 5.4% | 67.1% |
+| F1 score (defaults) | 0.098 | 0.658 |
+| AUC | 0.710 | 0.7105 |
+| Overall accuracy | 80.7% | 65.2% |
 
-- **Optimizer**: AdamW (lr = 2x10⁻⁴, weight decay = 1x10⁻⁴)
-- **Scheduler**: CosineAnnealingLR (T_max = 20, eta_min = 1x10⁻⁶)
-- **Batch size**: 8
+**Imbalanced ROC curve**
 
-### DANN
+![ROC Imbalanced](outputs/ROC%20Curve%20for%20Loan%20Default%20Prediction.png)
 
-- **Optimizer**: SGD (detector lr = 1x10⁻³, discriminator lr = 2x10⁻³, momentum = 0.9, weight decay = 5x10⁻⁴)
-- **Batch size**: 12 (source + target)
-- **GRL ramp**: logistic schedule, max coefficient = 0.20
+**Balanced ROC curve**
 
-### DCCAN
+![ROC Balanced](outputs/ROC%20Curve%20on%20Downsampled%20data.png)
 
-- **Optimizer**: SGD with separate parameter groups:
-  - Detector + proxy classifier: lr = 1.5x10⁻³
-  - Discriminators: lr = 4.5x10⁻⁴
-  - Both: momentum = 0.9, weight decay = 5x10⁻⁴
-- **Batch size**: 12 (source + target)
-- **Backbone freeze**: first 2 epochs
-- **Gradient clipping**: max norm = 5.0
+The two AUC scores are nearly identical (0.710 vs 0.7105), which means the model's underlying discriminatory power did not change. What changed is the decision threshold behavior. The balanced model surfaces far more true defaults at any given threshold, which is the operationally correct objective for a risk team.
 
-## Results
+## Business Interpretation
 
-### Final Evaluation (Raw Target Domain — Validation Split)
+The imbalanced model achieves 80.7% accuracy by predicting "fully paid" for nearly everything. It catches 5.4% of actual defaults. That is not a risk model — it is an accuracy illusion.
 
-| Model Variant | AP50 | mAP@[.50:.95] | mAR@100 | Notes |
-|---|---|---|---|---|
-| Baseline (Raw) | 0.149 | 0.039 | 0.104 | Shadows easier to detect than objects |
-| Baseline (Denoised) | 0.152 | 0.039 | 0.107 | Slight stability improvement |
-| Baseline (CLAHE + Aug) | 0.117 | 0.035 | 0.088 | Background amplification hurt precision |
-| DANN | 0.091 | 0.024 | 0.115 | Recall improved, precision dropped |
-| **DCCAN** | **0.163** | **0.043** | **0.155** | Best overall balance |
+The balanced model drops to 65.2% accuracy but catches 67.1% of defaults. For a lending institution, the cost of a missed default (loan loss) is far higher than the cost of a false positive (declined good borrower). Optimizing for recall is the correct business decision, even at the expense of overall accuracy.
 
-### FROC Analysis
+## Known Limitations
 
-FROC (Free-Response ROC) curves complement COCO metrics by showing how recall changes as the false-positive allowance per image (FPPI) increases.
+- **No train/test split.** Both models were trained and evaluated on the same data. Reported metrics reflect training performance, not generalization. A proper implementation would split the data before training and evaluate on a held-out test set only.
+- **Logistic regression is a baseline, not a ceiling.** Gradient boosted models (LightGBM, XGBoost) would likely produce higher AUC and better recall with the same data. This project intentionally focuses on interpretability and business framing rather than performance optimization.
+- **Downsampling discards data.** SMOTE or class weighting (`class_weight='balanced'`) would retain the full dataset and are worth comparing in a follow-up.
 
-- **Baselines**: strongest at low FPPI (~10-15), reaching recall ~0.30-0.31, conservative but saturating quickly.
-- **DANN**: extends recall but at steep precision cost, plateauing below DCCAN.
-- **DCCAN**: consistently dominates at higher FPPI, rising to nearly 0.47 recall, recovering significantly more true targets when moderate false-positive rates are acceptable.
+## Reproducing This Project
 
-This positions DCCAN as the most effective model in settings where maximizing target coverage matters more than strict conservatism (e.g., mine countermeasures, infrastructure inspection).
+The raw data is not included in this repository due to file size. To reproduce:
 
-## Visualizations
+1. Download the Lending Club dataset from [Kaggle](https://www.kaggle.com/datasets/wordsforthewise/lending-club)
+2. Place the CSV at `data/bank_loan.csv`
+3. Run `bank_loan_risk_analysis.ipynb` end to end
 
-![Detection Per Image](outputs/detection_per_image_20ep_mod.png)
+All outputs (plots, model results) are included in the `outputs/` folder.
 
-Per-image detection count boxplots across all model variants. Shows how detection volume and variance differ between baseline, DANN, and DCCAN configurations.
+## Takeaway
 
-![Detection Distribution](outputs/distri_of_detect_20_ep_mod.png)
+Accuracy is a misleading metric for imbalanced classification problems. In credit risk, the relevant question is not "how often is the model right?" but "how many defaults does it catch?" Reframing the evaluation criteria changes the model selection decision entirely.
 
-Detection count distribution histograms with KDE overlays. Illustrates the spread and concentration of detections across the validation set for each model.
-
-## Key Skills Demonstrated
-
-- **Data engineering**: YOLO to VOC format conversion, label remapping, stratified splits, multi-threaded batch preprocessing
-- **Deep learning**: Faster R-CNN, adversarial domain adaptation (DANN, CDAN, hybrid DCCAN), PyTorch/TorchVision APIs
-- **Transfer learning**: COCO-pretrained backbones adapted to sonar imagery
-- **Domain adaptation**: implemented DANN baseline and novel DCCAN hybrid with three alignment paths
-- **Evaluation**: COCO metrics (TorchMetrics) and FROC analysis for precision-recall characterization
-- **Reproducibility**: modular code, notebooks, saved checkpoints, exported loss logs and CSVs
-
-## Roadmap
-
-- Investigate adaptive or learnable λ-weighting for the three adversarial losses
-- Integrate pseudo-labeling and entropy minimization for unlabeled target domain
-- Extend pipeline to additional sonar modalities (FLS, SAS, multibeam) and cross-survey evaluation
-- Explore contrastive or self-supervised pretraining for backbone initialization
-- Experiment with transformer-based or attention-heavy architectures for long-range object-shadow context
-- Add explainability tools (class activation maps, embedding visualizations) for operational trust
-- Optimize inference for embedded maritime hardware (AUV deployment)
-
-## License
-
-Research-only. Non-commercial use unless otherwise agreed.
-For collaborations or applied deployments, please open an issue.
+*Part of a portfolio focused on analytics engineering, data quality, and production-grade reporting systems.*
 
 *Author: [Kablan Assebian](https://www.linkedin.com/in/gomis-kablan/) · [GitHub](https://github.com/Kablan-ASBN)*
