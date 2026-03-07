@@ -123,4 +123,5 @@ The 775 orders without items are a known characteristic of the Olist dataset. Th
 Revenue disagreements across teams are almost always caused by implicit assumptions about data structure and metric definitions, not bad data. The fix is not better dashboards. It is explicit grain control, documented metric logic, and automated validation checks that surface discrepancies before they reach stakeholders.
 
 *Part of a portfolio focused on analytics engineering, data quality, and production-grade reporting systems.*
+
 *Author: [Kablan Assebian](https://www.linkedin.com/in/gomis-kablan/) · [GitHub](https://github.com/Kablan-ASBN)*
