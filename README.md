@@ -83,19 +83,19 @@ Seven named data quality checks run against the reconciled dataset, each with a 
 
 ### Revenue by Definition (Order-Level)
 
-![Revenue by Definition](revenue_by_definition__order-level_.png)
+![Revenue by Definition](docs/revenue_by_definition__order-level_.png)
 
-The $2.4M gap between gross items-only revenue (~$13.6M) and paid revenue (~$16.0M) is entirely explained by freight charges and definition scope — not data errors. Once freight is included in the gross figure, all four definitions converge within $0.2M.
+The $2.4M gap between gross items-only revenue ($13.6M) and paid revenue ($16.0M) is entirely explained by freight charges and definition scope, not data errors. Once freight is included in the gross figure, all four definitions converge within $0.2M.
 
 ### Mismatch Buckets — Order Share
 
-![Mismatch Buckets Order Share](Mismatch_Buckets__order_share_.png)
+![Mismatch Buckets Order Share](docs/Mismatch_Buckets__order_share_.png)
 
 Over 99% of orders fall within the match tolerance. The remaining mismatch volume is concentrated in two buckets: `payment_no_items` (orders where payment was captured but no item record exists) and `canceled_with_payment` (orders canceled after payment was collected).
 
 ### Mismatch Buckets — Absolute Revenue Delta
 
-![Mismatch Buckets Revenue Delta](Mismatch_Buckets__Absolute_revenue_delta_.png)
+![Mismatch Buckets Revenue Delta](docs/Mismatch_Buckets__Absolute_revenue_delta_.png)
 
 The `payment_no_items` bucket drives the largest absolute revenue impact (~$0.13M), despite representing less than 1% of orders. This is the highest-priority operational issue identified — a small number of orders account for a disproportionate share of unexplained revenue.
 
@@ -127,13 +127,14 @@ The `payment_no_items` bucket drives the largest absolute revenue impact (~$0.13
 revenue-kpi-reconciliation/
 ├── README.md
 ├── revenue_reconciliation_order_level.ipynb      # Full analysis notebook
-├── revenue_by_definition__order-level_.png       # Revenue comparison chart
-├── Mismatch_Buckets__order_share_.png            # Mismatch distribution chart
-├── Mismatch_Buckets__Absolute_revenue_delta_.png # Revenue delta chart
-└── data/
-    └── processed/
-        ├── reconciliation_order_level.csv        # Order-level reconciliation output
-        └── validation_checks.csv                # Validation check results
+├── data/
+│   └── processed/
+│       ├── reconciliation_order_level.csv        # Order-level reconciliation output
+│       └── validation_checks.csv                # Validation check results
+└── docs/
+    ├── revenue_by_definition__order-level_.png   # Revenue comparison chart
+    ├── Mismatch_Buckets__order_share_.png        # Mismatch distribution chart
+    └── Mismatch_Buckets__Absolute_revenue_delta_.png  # Revenue delta chart
 ```
 
 ---
